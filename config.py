@@ -16,7 +16,7 @@ def _get_secret(key: str, default: str = "") -> str:
     return os.getenv(key, default)
 
 
-LLM_API_KEY  = _get_secret("LLM_API_KEY",  "sk-0a7e47d980a44aefaf8e19157b4ad3fd")
+LLM_API_KEY  = _get_secret("LLM_API_KEY",  "")
 LLM_BASE_URL = _get_secret("LLM_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1")
 LLM_MODEL    = _get_secret("LLM_MODEL",    "qwen-plus")
 

@@ -90,11 +90,14 @@ with st.sidebar:
 
     st.divider()
     st.markdown("### ⚙️ 配置")
+
+    # API Key 已通过云端 Secrets 配置时，不在界面显示真实值
+    key_configured = bool(config.LLM_API_KEY)
     api_key = st.text_input(
         "API Key",
-        value=config.LLM_API_KEY if config.LLM_API_KEY != "your-api-key-here" else "",
+        value="",
         type="password",
-        placeholder="输入你的 API Key",
+        placeholder="已配置 ✓" if key_configured else "输入你的 API Key",
         help="支持 OpenAI / 通义千问 / DeepSeek / 智谱等",
     )
     base_url = st.text_input(
@@ -105,9 +108,13 @@ with st.sidebar:
     model_name = st.text_input("模型名称", value=config.LLM_MODEL)
 
     if st.button("保存配置", use_container_width=True):
-        config.LLM_API_KEY = api_key
-        config.LLM_BASE_URL = base_url
-        config.LLM_MODEL = model_name
+        # 只有用户实际输入了新 Key 才覆盖，否则保留原有配置
+        if api_key.strip():
+            config.LLM_API_KEY = api_key.strip()
+        if base_url.strip():
+            config.LLM_BASE_URL = base_url.strip()
+        if model_name.strip():
+            config.LLM_MODEL = model_name.strip()
         st.success("配置已更新")
 
     st.divider()

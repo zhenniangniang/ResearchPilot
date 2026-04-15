@@ -1,5 +1,6 @@
 import sys
 import os
+import io
 
 # 确保从项目根目录运行时模块可被正确导入
 sys.path.insert(0, os.path.dirname(__file__))
@@ -20,6 +21,7 @@ from modules.data_analysis import load_and_analyze, ask_data_question
 from modules.expression import (
     generate_outline,
     generate_ppt_structure,
+    generate_ppt_from_file,
     generate_result_paragraph,
     generate_chart_description,
 )
@@ -28,6 +30,13 @@ import config
 # ─── 自定义样式 ────────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
+    /* 隐藏 Streamlit 右上角菜单和页脚 */
+    #MainMenu { visibility: hidden; }
+    header[data-testid="stHeader"] { background: transparent; }
+    footer { visibility: hidden; }
+    [data-testid="stToolbar"] { display: none; }
+    [data-testid="stDecoration"] { display: none; }
+
     /* 主标题区 */
     .main-header {
         background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
@@ -56,8 +65,15 @@ st.markdown("""
         padding: 1rem 1.2rem;
     }
 
-    /* 隐藏 Streamlit 默认底部 */
-    footer { visibility: hidden; }
+    /* 隐私提示 */
+    .privacy-note {
+        background: #f0fdf4;
+        border: 1px solid #bbf7d0;
+        border-radius: 6px;
+        padding: 0.5rem 0.8rem;
+        font-size: 0.75rem;
+        color: #166534;
+    }
 
     /* 按钮美化 */
     .stButton > button {
@@ -108,7 +124,6 @@ with st.sidebar:
     model_name = st.text_input("模型名称", value=config.LLM_MODEL)
 
     if st.button("保存配置", use_container_width=True):
-        # 只有用户实际输入了新 Key 才覆盖，否则保留原有配置
         if api_key.strip():
             config.LLM_API_KEY = api_key.strip()
         if base_url.strip():
@@ -118,6 +133,10 @@ with st.sidebar:
         st.success("配置已更新")
 
     st.divider()
+    st.markdown(
+        '<div class="privacy-note">🔒 用户数据不留存，仅用于本次会话处理</div>',
+        unsafe_allow_html=True,
+    )
     st.caption("比赛作品 · ResearchPilot v1.0")
 
 
@@ -232,7 +251,7 @@ elif page == "📊 数据分析建议":
     st.markdown("""
     <div class="main-header">
         <h1>📊 数据分析建议</h1>
-        <p>上传 Excel / CSV，AI 自动识别变量类型并推荐最适合的统计分析方法</p>
+        <p>上传 Excel / CSV，AI 自动识别变量类型、推荐分析方法并生成可视化图表</p>
     </div>
     """, unsafe_allow_html=True)
 
@@ -285,8 +304,8 @@ elif page == "📊 数据分析建议":
                 type_counts: dict = {}
                 for vtype in info["variable_types"].values():
                     type_counts[vtype] = type_counts.get(vtype, 0) + 1
-                metric_cols = st.columns(len(type_counts))
-                for i, (vtype, cnt) in enumerate(type_counts.items()):
+                metric_cols = st.columns(min(len(type_counts), 4))
+                for i, (vtype, cnt) in enumerate(list(type_counts.items())[:4]):
                     metric_cols[i].metric(vtype, cnt)
 
     with col2:
@@ -305,6 +324,132 @@ elif page == "📊 数据分析建议":
                 '<div class="feature-card">分析建议将在此处显示</div>',
                 unsafe_allow_html=True,
             )
+
+    # ── 图表可视化区 ──────────────────────────────────────────────────────────
+    if st.session_state["data_df"] is not None:
+        st.divider()
+        st.markdown("#### 📈 数据可视化")
+
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+        import seaborn as sns
+        import pandas as pd
+
+        df = st.session_state["data_df"]
+        info = st.session_state["data_info"]
+
+        # 筛选数值列和分类列
+        num_cols = [c for c in df.columns if str(df[c].dtype) in
+                    ("float64", "float32", "int64", "int32") and df[c].nunique() > 2][:8]
+        cat_cols = [c for c in df.columns if str(df[c].dtype) == "object"
+                    and df[c].nunique() <= 15][:5]
+
+        chart_tabs = []
+        if num_cols:
+            chart_tabs += ["📊 数值分布", "📦 箱线图"]
+        if len(num_cols) >= 2:
+            chart_tabs += ["🔥 相关热力图"]
+        if cat_cols:
+            chart_tabs += ["📋 类别频次"]
+
+        if not chart_tabs:
+            st.info("数值型或分类型列不足，无法自动生成图表。")
+        else:
+            tabs = st.tabs(chart_tabs)
+            tab_idx = 0
+            plt.rcParams["font.family"] = ["Arial Unicode MS", "SimHei", "DejaVu Sans"]
+            plt.rcParams["axes.unicode_minus"] = False
+
+            if "📊 数值分布" in chart_tabs:
+                with tabs[tab_idx]:
+                    tab_idx += 1
+                    sel_col = st.selectbox("选择变量", num_cols, key="hist_col")
+                    fig, ax = plt.subplots(figsize=(7, 4))
+                    sns.histplot(df[sel_col].dropna(), kde=True, ax=ax, color="#0ea5e9")
+                    ax.set_title(f"{sel_col} 分布", fontsize=13)
+                    ax.set_xlabel(sel_col)
+                    ax.set_ylabel("频次")
+                    st.pyplot(fig, use_container_width=True)
+                    plt.close(fig)
+
+            if "📦 箱线图" in chart_tabs:
+                with tabs[tab_idx]:
+                    tab_idx += 1
+                    box_cols = st.multiselect("选择变量（可多选）", num_cols,
+                                              default=num_cols[:3], key="box_cols")
+                    if box_cols:
+                        fig, ax = plt.subplots(figsize=(max(6, len(box_cols) * 1.5), 4))
+                        df[box_cols].dropna().boxplot(ax=ax)
+                        ax.set_title("箱线图", fontsize=13)
+                        plt.xticks(rotation=30, ha="right")
+                        st.pyplot(fig, use_container_width=True)
+                        plt.close(fig)
+
+            if "🔥 相关热力图" in chart_tabs:
+                with tabs[tab_idx]:
+                    tab_idx += 1
+                    corr_cols = st.multiselect("选择变量（建议3-8个）", num_cols,
+                                               default=num_cols[:6], key="corr_cols")
+                    if len(corr_cols) >= 2:
+                        corr = df[corr_cols].corr()
+                        fig, ax = plt.subplots(figsize=(max(5, len(corr_cols)), max(4, len(corr_cols) * 0.8)))
+                        sns.heatmap(corr, annot=True, fmt=".2f", cmap="coolwarm",
+                                    ax=ax, linewidths=0.5, vmin=-1, vmax=1)
+                        ax.set_title("Pearson 相关系数热力图", fontsize=13)
+                        plt.tight_layout()
+                        st.pyplot(fig, use_container_width=True)
+                        plt.close(fig)
+                    else:
+                        st.info("请至少选择 2 个变量")
+
+            if "📋 类别频次" in chart_tabs:
+                with tabs[tab_idx]:
+                    sel_cat = st.selectbox("选择分类变量", cat_cols, key="cat_col")
+                    vc = df[sel_cat].value_counts().head(15)
+                    fig, ax = plt.subplots(figsize=(7, 4))
+                    vc.plot(kind="bar", ax=ax, color="#6366f1", edgecolor="white")
+                    ax.set_title(f"{sel_cat} 类别频次", fontsize=13)
+                    ax.set_xlabel("")
+                    ax.set_ylabel("频次")
+                    plt.xticks(rotation=30, ha="right")
+                    plt.tight_layout()
+                    st.pyplot(fig, use_container_width=True)
+                    plt.close(fig)
+
+        # ── 图表说明文字生成 ──────────────────────────────────────────────────
+        st.divider()
+        st.markdown("#### 🖼️ 图表说明文字生成")
+        chart_desc_cols = st.columns([1, 1, 1])
+        with chart_desc_cols[0]:
+            chart_type_sel = st.selectbox(
+                "图表类型",
+                ["直方图", "箱线图", "相关热力图", "柱状图", "折线图",
+                 "散点图", "生存曲线", "ROC曲线", "火山图", "其他"],
+                key="desc_chart_type",
+            )
+        with chart_desc_cols[1]:
+            chart_desc_text = st.text_area(
+                "图表内容描述", height=80,
+                placeholder="X轴为...，Y轴为...，展示了...",
+                key="desc_chart_desc",
+            )
+        with chart_desc_cols[2]:
+            chart_findings = st.text_area(
+                "主要发现", height=80,
+                placeholder="图表揭示的核心结论...",
+                key="desc_chart_findings",
+            )
+        if st.button("生成图注", use_container_width=True, key="gen_chart_desc"):
+            if not chart_desc_text or not chart_findings:
+                st.error("请填写图表描述和主要发现")
+            elif _check_config():
+                with st.spinner("生成中..."):
+                    desc_result = generate_chart_description(
+                        chart_type_sel, chart_desc_text, chart_findings
+                    )
+                st.markdown(f'<div class="result-box">{desc_result}</div>',
+                            unsafe_allow_html=True)
 
     # 追问区
     if st.session_state["data_info"]:
@@ -337,13 +482,13 @@ elif page == "✍️ 科研表达生成":
     st.markdown("""
     <div class="main-header">
         <h1>✍️ 科研表达生成</h1>
-        <p>输入研究内容，AI 自动生成开题报告提纲、PPT框架、论文段落及图表说明</p>
+        <p>生成开题报告提纲、PPT 文件、论文结果段落，AI 全程辅助科研写作</p>
     </div>
     """, unsafe_allow_html=True)
 
     expr_type = st.segmented_control(
         "选择生成类型",
-        ["📋 开题报告提纲", "🖥️ PPT 汇报结构", "📝 论文结果段落", "🖼️ 图表说明文字"],
+        ["📋 开题报告提纲", "🖥️ PPT 文件生成", "📝 论文结果段落"],
         default="📋 开题报告提纲",
     )
 
@@ -351,6 +496,7 @@ elif page == "✍️ 科研表达生成":
 
     with col_form:
         result_text = ""
+        pptx_bytes = None
 
         # ── 开题报告提纲 ──────────────────────────────────────────────────────
         if expr_type == "📋 开题报告提纲":
@@ -371,29 +517,54 @@ elif page == "✍️ 科研表达生成":
                     with st.spinner("生成中..."):
                         result_text = generate_outline(topic, context)
 
-        # ── PPT 汇报结构 ──────────────────────────────────────────────────────
-        elif expr_type == "🖥️ PPT 汇报结构":
-            st.markdown("#### PPT 汇报框架生成")
-            topic = st.text_input(
-                "汇报主题 *",
-                placeholder="例如：RNA-seq 差异表达分析结果汇报",
-            )
-            context = st.text_area(
-                "内容摘要（可选）",
-                placeholder="主要研究内容、核心发现...",
-                height=100,
+        # ── PPT 文件生成 ──────────────────────────────────────────────────────
+        elif expr_type == "🖥️ PPT 文件生成":
+            st.markdown("#### PPT 文件生成")
+            ppt_input = st.radio(
+                "内容来源", ["上传文件（PDF / Word）", "手动输入主题"], horizontal=True
             )
             duration = st.slider("汇报时长（分钟）", 5, 30, 10)
-            if st.button("生成 PPT 框架", type="primary", use_container_width=True):
-                if not topic:
-                    st.error("请填写汇报主题")
-                elif _check_config():
-                    with st.spinner("生成中..."):
-                        result_text = generate_ppt_structure(topic, context, duration)
+
+            if ppt_input == "上传文件（PDF / Word）":
+                ppt_file = st.file_uploader(
+                    "上传文件", type=["pdf", "docx", "doc"],
+                    label_visibility="collapsed",
+                )
+                if ppt_file:
+                    st.info(f"已上传：{ppt_file.name}（{ppt_file.size // 1024} KB）")
+                if st.button("🚀 生成 PPT", type="primary", use_container_width=True):
+                    if not ppt_file:
+                        st.error("请先上传文件")
+                    elif _check_config():
+                        with st.spinner("AI 正在读取文件并生成 PPT，请稍候..."):
+                            try:
+                                result_text, pptx_bytes = generate_ppt_from_file(
+                                    ppt_file.read(), ppt_file.name, duration
+                                )
+                                st.success("✅ PPT 生成完成！")
+                            except Exception as e:
+                                st.error(f"生成失败：{e}")
+            else:
+                topic = st.text_input(
+                    "汇报主题 *",
+                    placeholder="例如：RNA-seq 差异表达分析结果汇报",
+                )
+                context = st.text_area(
+                    "内容摘要（可选）",
+                    placeholder="主要研究内容、核心发现...",
+                    height=100,
+                )
+                if st.button("生成 PPT 框架", type="primary", use_container_width=True):
+                    if not topic:
+                        st.error("请填写汇报主题")
+                    elif _check_config():
+                        with st.spinner("生成中..."):
+                            result_text = generate_ppt_structure(topic, context, duration)
 
         # ── 论文结果段落 ──────────────────────────────────────────────────────
         elif expr_type == "📝 论文结果段落":
             st.markdown("#### 论文结果段落生成")
+            st.caption("输入统计分析数据，AI 自动生成符合期刊规范的结果章节段落")
             method = st.text_input(
                 "分析方法 *",
                 placeholder="例如：多因素 Logistic 回归分析",
@@ -415,36 +586,23 @@ elif page == "✍️ 科研表达生成":
                     with st.spinner("生成中..."):
                         result_text = generate_result_paragraph(method, results, context)
 
-        # ── 图表说明文字 ──────────────────────────────────────────────────────
-        elif expr_type == "🖼️ 图表说明文字":
-            st.markdown("#### 图表说明文字生成")
-            chart_type = st.selectbox(
-                "图表类型 *",
-                ["折线图", "柱状图", "散点图", "箱线图", "热图", "生存曲线", "ROC曲线",
-                 "火山图", "流程图", "其他"],
-            )
-            description = st.text_area(
-                "图表内容描述 *",
-                placeholder="描述图表展示的内容，如：X轴为时间，Y轴为累积生存率，展示了治疗组与对照组的生存曲线...",
-                height=120,
-            )
-            findings = st.text_area(
-                "主要发现 *",
-                placeholder="图表揭示的核心结论...",
-                height=80,
-            )
-            if st.button("生成图注", type="primary", use_container_width=True):
-                if not description or not findings:
-                    st.error("请填写图表描述和主要发现")
-                elif _check_config():
-                    with st.spinner("生成中..."):
-                        result_text = generate_chart_description(
-                            chart_type, description, findings
-                        )
-
     with col_result:
         st.markdown("#### 生成结果")
-        if result_text:
+        if pptx_bytes:
+            # 先展示内容预览，再提供下载
+            if result_text:
+                with st.expander("查看 PPT 内容预览", expanded=False):
+                    st.markdown(result_text)
+            st.success("PPT 文件已就绪，点击下方按钮下载")
+            st.download_button(
+                "⬇️ 下载 PPT 文件（.pptx）",
+                data=pptx_bytes,
+                file_name="AI生成演示文稿.pptx",
+                mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                use_container_width=True,
+                type="primary",
+            )
+        elif result_text:
             st.markdown(result_text)
             st.download_button(
                 "⬇️ 下载结果（Markdown）",

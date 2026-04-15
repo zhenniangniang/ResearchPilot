@@ -7,7 +7,7 @@ import os
 def _get_secret(key: str, default: str = "") -> str:
     """兼容本地运行和 Streamlit Cloud 部署的配置读取。"""
     try:
-        import streamlit as st
+        import streamlit as st  # type: ignore
         val = st.secrets.get(key)
         if val:
             return val

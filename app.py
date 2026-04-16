@@ -107,7 +107,6 @@ with st.sidebar:
     st.divider()
     st.markdown("### ⚙️ 配置")
 
-    # API Key 已通过云端 Secrets 配置时，不在界面显示真实值
     key_configured = bool(config.LLM_API_KEY)
     api_key = st.text_input(
         "API Key",
@@ -141,7 +140,6 @@ with st.sidebar:
 
 
 def _check_config() -> bool:
-    """检查 API Key 是否已配置。"""
     if not config.LLM_API_KEY or config.LLM_API_KEY == "your-api-key-here":
         st.warning("⚠️ 请先在左侧侧边栏填写 API Key 后再使用功能。")
         return False
@@ -186,7 +184,7 @@ if page == "📄 文献智能解读":
 
         if btn_analyze and _check_config():
             try:
-                with st.spinner("AI 正在解读文献，请稍候..."):
+                with st.spinner("🤖 AI 正在解读文献，请稍候..."):
                     if input_method == "上传 PDF 文件":
                         if not uploaded_file:
                             st.error("请先上传 PDF 文件")
@@ -198,7 +196,6 @@ if page == "📄 文献智能解读":
                             st.error("请输入文献内容")
                             st.stop()
                         result = analyze_literature(raw_text)
-
                     st.session_state["lit_text"] = raw_text
                     st.session_state["lit_result"] = result
                     st.success("✅ 解读完成！")
@@ -222,7 +219,6 @@ if page == "📄 文献智能解读":
                 unsafe_allow_html=True,
             )
 
-    # 追问区
     if st.session_state["lit_text"]:
         st.divider()
         st.markdown("#### 💬 追问文献")
@@ -237,7 +233,7 @@ if page == "📄 文献智能解读":
             ask_btn = st.button("提问", use_container_width=True)
 
         if ask_btn and follow_q and _check_config():
-            with st.spinner("思考中..."):
+            with st.spinner("✨ 思考中，稍等一下～"):
                 answer = ask_literature_question(st.session_state["lit_text"], follow_q)
             st.markdown(
                 f'<div class="result-box">{answer}</div>', unsafe_allow_html=True
@@ -251,228 +247,299 @@ elif page == "📊 数据分析建议":
     st.markdown("""
     <div class="main-header">
         <h1>📊 数据分析建议</h1>
-        <p>上传 Excel / CSV，AI 自动识别变量类型、推荐分析方法并生成可视化图表</p>
+        <p>上传数据，AI 推荐分析方法；或选择变量，即时生成可视化图表</p>
     </div>
     """, unsafe_allow_html=True)
 
-    col1, col2 = st.columns([1, 1], gap="large")
+    data_sub = st.segmented_control(
+        "子模块切换",
+        ["🔍 智能分析建议", "📈 变量可视化"],
+        default="🔍 智能分析建议",
+        label_visibility="collapsed",
+    )
 
-    with col1:
-        st.markdown("#### 上传数据文件")
-        uploaded_data = st.file_uploader(
-            "上传数据（Excel / CSV）",
-            type=["xlsx", "xls", "csv"],
-            label_visibility="collapsed",
-        )
-        research_goal = st.text_area(
-            "研究目的（可选）",
-            placeholder="例如：探索哪些因素影响患者30天再入院率...",
-            height=100,
-            help="描述你的研究问题，AI 可给出更针对性的建议",
-        )
-        btn_data = st.button("🔍 分析数据", type="primary", use_container_width=True)
+    # ══════════════════════════════════════════════════════════════════════════
+    # 子模块 A：智能分析建议
+    # ══════════════════════════════════════════════════════════════════════════
+    if data_sub == "🔍 智能分析建议":
+        col1, col2 = st.columns([1, 1], gap="large")
 
-        if btn_data and _check_config():
-            if not uploaded_data:
-                st.error("请先上传数据文件")
+        with col1:
+            st.markdown("#### 上传数据文件")
+            uploaded_data = st.file_uploader(
+                "上传数据（Excel / CSV）",
+                type=["xlsx", "xls", "csv"],
+                label_visibility="collapsed",
+                key="data_uploader_analysis",
+            )
+            research_goal = st.text_area(
+                "研究目的（可选）",
+                placeholder="例如：探索哪些因素影响患者30天再入院率...",
+                height=100,
+                help="描述你的研究问题，AI 可给出更针对性的建议",
+            )
+            btn_data = st.button("🔍 开始分析", type="primary", use_container_width=True)
+
+            if btn_data and _check_config():
+                if not uploaded_data:
+                    st.error("请先上传数据文件")
+                else:
+                    try:
+                        with st.spinner("🧠 AI 正在分析数据结构，努力思考中..."):
+                            file_bytes = uploaded_data.read()
+                            df, info, advice = load_and_analyze(
+                                file_bytes, uploaded_data.name, research_goal
+                            )
+                            st.session_state["data_df"] = df
+                            st.session_state["data_info"] = info
+                            st.session_state["data_advice"] = advice
+                            st.session_state["data_filename"] = uploaded_data.name
+                        st.success("✅ 分析完成！")
+                    except Exception as e:
+                        st.error(f"分析失败：{e}")
+
+            # 数据预览
+            if st.session_state["data_df"] is not None:
+                st.markdown("#### 数据预览")
+                df = st.session_state["data_df"]
+                st.caption(f"共 {df.shape[0]} 行 × {df.shape[1]} 列")
+                from utils.data_parser import get_preview
+                st.dataframe(get_preview(df), use_container_width=True)
+
+                info = st.session_state["data_info"]
+                if info:
+                    type_counts: dict = {}
+                    for vtype in info["variable_types"].values():
+                        type_counts[vtype] = type_counts.get(vtype, 0) + 1
+                    metric_cols = st.columns(min(len(type_counts), 4))
+                    for i, (vtype, cnt) in enumerate(list(type_counts.items())[:4]):
+                        metric_cols[i].metric(vtype, cnt)
+
+        with col2:
+            st.markdown("#### AI 分析建议")
+            if st.session_state["data_advice"]:
+                st.markdown(st.session_state["data_advice"])
+                st.download_button(
+                    "⬇️ 下载分析建议（Markdown）",
+                    data=st.session_state["data_advice"],
+                    file_name="数据分析建议.md",
+                    mime="text/markdown",
+                    use_container_width=True,
+                )
             else:
-                try:
-                    with st.spinner("正在分析数据结构并生成建议..."):
-                        file_bytes = uploaded_data.read()
-                        df, info, advice = load_and_analyze(
-                            file_bytes, uploaded_data.name, research_goal
-                        )
-                        st.session_state["data_df"] = df
-                        st.session_state["data_info"] = info
-                        st.session_state["data_advice"] = advice
-                        st.session_state["data_filename"] = uploaded_data.name
-                    st.success("✅ 分析完成！")
-                except Exception as e:
-                    st.error(f"分析失败：{e}")
+                st.markdown(
+                    '<div class="feature-card">分析建议将在此处显示</div>',
+                    unsafe_allow_html=True,
+                )
 
-        # 数据预览
-        if st.session_state["data_df"] is not None:
-            st.markdown("#### 数据预览")
-            df = st.session_state["data_df"]
-            st.caption(f"共 {df.shape[0]} 行 × {df.shape[1]} 列")
-            from utils.data_parser import get_preview
-            st.dataframe(get_preview(df), use_container_width=True)
+        # 追问区
+        if st.session_state["data_info"]:
+            st.divider()
+            st.markdown("#### 💬 追问数据分析")
+            q_col2, btn_col2 = st.columns([5, 1])
+            with q_col2:
+                data_q = st.text_input(
+                    "追问",
+                    placeholder="例如：如果结局变量是连续的，应该用什么方法检验两组差异？",
+                    label_visibility="collapsed",
+                )
+            with btn_col2:
+                ask_data_btn = st.button("提问", key="ask_data", use_container_width=True)
 
-            # 变量类型统计
-            info = st.session_state["data_info"]
-            if info:
-                type_counts: dict = {}
-                for vtype in info["variable_types"].values():
-                    type_counts[vtype] = type_counts.get(vtype, 0) + 1
-                metric_cols = st.columns(min(len(type_counts), 4))
-                for i, (vtype, cnt) in enumerate(list(type_counts.items())[:4]):
-                    metric_cols[i].metric(vtype, cnt)
+            if ask_data_btn and data_q and _check_config():
+                with st.spinner("✨ 思考中，稍等一下～"):
+                    ans = ask_data_question(
+                        st.session_state["data_info"],
+                        st.session_state["data_advice"] or "",
+                        data_q,
+                    )
+                st.markdown(f'<div class="result-box">{ans}</div>', unsafe_allow_html=True)
 
-    with col2:
-        st.markdown("#### AI 分析建议")
-        if st.session_state["data_advice"]:
-            st.markdown(st.session_state["data_advice"])
-            st.download_button(
-                "⬇️ 下载分析建议（Markdown）",
-                data=st.session_state["data_advice"],
-                file_name="数据分析建议.md",
-                mime="text/markdown",
-                use_container_width=True,
-            )
-        else:
-            st.markdown(
-                '<div class="feature-card">分析建议将在此处显示</div>',
-                unsafe_allow_html=True,
-            )
-
-    # ── 图表可视化区 ──────────────────────────────────────────────────────────
-    if st.session_state["data_df"] is not None:
-        st.divider()
-        st.markdown("#### 📈 数据可视化")
+    # ══════════════════════════════════════════════════════════════════════════
+    # 子模块 B：变量可视化
+    # ══════════════════════════════════════════════════════════════════════════
+    elif data_sub == "📈 变量可视化":
 
         import matplotlib
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
         import seaborn as sns
-        import pandas as pd
 
-        df = st.session_state["data_df"]
-        info = st.session_state["data_info"]
+        plt.rcParams["font.family"] = ["Arial Unicode MS", "SimHei", "DejaVu Sans"]
+        plt.rcParams["axes.unicode_minus"] = False
 
-        # 筛选数值列和分类列
-        num_cols = [c for c in df.columns if str(df[c].dtype) in
-                    ("float64", "float32", "int64", "int32") and df[c].nunique() > 2][:8]
-        cat_cols = [c for c in df.columns if str(df[c].dtype) == "object"
-                    and df[c].nunique() <= 15][:5]
-
-        chart_tabs = []
-        if num_cols:
-            chart_tabs += ["📊 数值分布", "📦 箱线图"]
-        if len(num_cols) >= 2:
-            chart_tabs += ["🔥 相关热力图"]
-        if cat_cols:
-            chart_tabs += ["📋 类别频次"]
-
-        if not chart_tabs:
-            st.info("数值型或分类型列不足，无法自动生成图表。")
+        # 若尚未上传数据，提示先去分析建议页上传
+        if st.session_state["data_df"] is None:
+            st.info("📂 请先在「🔍 智能分析建议」标签上传数据文件，再来这里画图。")
         else:
-            tabs = st.tabs(chart_tabs)
-            tab_idx = 0
-            plt.rcParams["font.family"] = ["Arial Unicode MS", "SimHei", "DejaVu Sans"]
-            plt.rcParams["axes.unicode_minus"] = False
+            df = st.session_state["data_df"]
+            all_cols = list(df.columns)
+            num_cols = [c for c in df.columns if str(df[c].dtype) in
+                        ("float64", "float32", "int64", "int32")]
+            cat_cols = [c for c in df.columns if str(df[c].dtype) == "object"
+                        and df[c].nunique() <= 30]
 
-            if "📊 数值分布" in chart_tabs:
-                with tabs[tab_idx]:
-                    tab_idx += 1
-                    sel_col = st.selectbox("选择变量", num_cols, key="hist_col")
-                    fig, ax = plt.subplots(figsize=(7, 4))
-                    sns.histplot(df[sel_col].dropna(), kde=True, ax=ax, color="#0ea5e9")
-                    ax.set_title(f"{sel_col} 分布", fontsize=13)
-                    ax.set_xlabel(sel_col)
-                    ax.set_ylabel("频次")
-                    st.pyplot(fig, use_container_width=True)
-                    plt.close(fig)
+            st.markdown(f"#### 当前数据：`{st.session_state['data_filename']}`  "
+                        f"（{df.shape[0]} 行 × {df.shape[1]} 列）")
 
-            if "📦 箱线图" in chart_tabs:
-                with tabs[tab_idx]:
-                    tab_idx += 1
-                    box_cols = st.multiselect("选择变量（可多选）", num_cols,
-                                              default=num_cols[:3], key="box_cols")
-                    if box_cols:
-                        fig, ax = plt.subplots(figsize=(max(6, len(box_cols) * 1.5), 4))
-                        df[box_cols].dropna().boxplot(ax=ax)
-                        ax.set_title("箱线图", fontsize=13)
-                        plt.xticks(rotation=30, ha="right")
-                        st.pyplot(fig, use_container_width=True)
-                        plt.close(fig)
+            ctrl_col, chart_col = st.columns([1, 2], gap="large")
 
-            if "🔥 相关热力图" in chart_tabs:
-                with tabs[tab_idx]:
-                    tab_idx += 1
-                    corr_cols = st.multiselect("选择变量（建议3-8个）", num_cols,
-                                               default=num_cols[:6], key="corr_cols")
-                    if len(corr_cols) >= 2:
-                        corr = df[corr_cols].corr()
-                        fig, ax = plt.subplots(figsize=(max(5, len(corr_cols)), max(4, len(corr_cols) * 0.8)))
-                        sns.heatmap(corr, annot=True, fmt=".2f", cmap="coolwarm",
-                                    ax=ax, linewidths=0.5, vmin=-1, vmax=1)
-                        ax.set_title("Pearson 相关系数热力图", fontsize=13)
-                        plt.tight_layout()
-                        st.pyplot(fig, use_container_width=True)
-                        plt.close(fig)
-                    else:
-                        st.info("请至少选择 2 个变量")
-
-            if "📋 类别频次" in chart_tabs:
-                with tabs[tab_idx]:
-                    sel_cat = st.selectbox("选择分类变量", cat_cols, key="cat_col")
-                    vc = df[sel_cat].value_counts().head(15)
-                    fig, ax = plt.subplots(figsize=(7, 4))
-                    vc.plot(kind="bar", ax=ax, color="#6366f1", edgecolor="white")
-                    ax.set_title(f"{sel_cat} 类别频次", fontsize=13)
-                    ax.set_xlabel("")
-                    ax.set_ylabel("频次")
-                    plt.xticks(rotation=30, ha="right")
-                    plt.tight_layout()
-                    st.pyplot(fig, use_container_width=True)
-                    plt.close(fig)
-
-        # ── 图表说明文字生成 ──────────────────────────────────────────────────
-        st.divider()
-        st.markdown("#### 🖼️ 图表说明文字生成")
-        chart_desc_cols = st.columns([1, 1, 1])
-        with chart_desc_cols[0]:
-            chart_type_sel = st.selectbox(
-                "图表类型",
-                ["直方图", "箱线图", "相关热力图", "柱状图", "折线图",
-                 "散点图", "生存曲线", "ROC曲线", "火山图", "其他"],
-                key="desc_chart_type",
-            )
-        with chart_desc_cols[1]:
-            chart_desc_text = st.text_area(
-                "图表内容描述", height=80,
-                placeholder="X轴为...，Y轴为...，展示了...",
-                key="desc_chart_desc",
-            )
-        with chart_desc_cols[2]:
-            chart_findings = st.text_area(
-                "主要发现", height=80,
-                placeholder="图表揭示的核心结论...",
-                key="desc_chart_findings",
-            )
-        if st.button("生成图注", use_container_width=True, key="gen_chart_desc"):
-            if not chart_desc_text or not chart_findings:
-                st.error("请填写图表描述和主要发现")
-            elif _check_config():
-                with st.spinner("生成中..."):
-                    desc_result = generate_chart_description(
-                        chart_type_sel, chart_desc_text, chart_findings
-                    )
-                st.markdown(f'<div class="result-box">{desc_result}</div>',
-                            unsafe_allow_html=True)
-
-    # 追问区
-    if st.session_state["data_info"]:
-        st.divider()
-        st.markdown("#### 💬 追问数据分析")
-        q_col2, btn_col2 = st.columns([5, 1])
-        with q_col2:
-            data_q = st.text_input(
-                "追问",
-                placeholder="例如：如果结局变量是连续的，应该用什么方法检验两组差异？",
-                label_visibility="collapsed",
-            )
-        with btn_col2:
-            ask_data_btn = st.button("提问", key="ask_data", use_container_width=True)
-
-        if ask_data_btn and data_q and _check_config():
-            with st.spinner("思考中..."):
-                ans = ask_data_question(
-                    st.session_state["data_info"],
-                    st.session_state["data_advice"] or "",
-                    data_q,
+            with ctrl_col:
+                st.markdown("##### 图表设置")
+                chart_type = st.selectbox(
+                    "图表类型",
+                    ["� 直方图（单变量分布）",
+                     "🔵 散点图（两变量关系）",
+                     "📦 箱线图（分组比较）",
+                     "📋 柱状图（类别频次）",
+                     "🔥 相关热力图（多变量）",
+                     "📉 折线图（趋势）"],
+                    key="viz_chart_type",
                 )
-            st.markdown(f'<div class="result-box">{ans}</div>', unsafe_allow_html=True)
+
+                fig = None
+
+                if chart_type == "📊 直方图（单变量分布）":
+                    x_col = st.selectbox("选择变量", num_cols or all_cols, key="hist_x")
+                    bins = st.slider("分组数", 5, 80, 20, key="hist_bins")
+                    show_kde = st.checkbox("显示密度曲线", value=True, key="hist_kde")
+                    if st.button("🎨 生成图表", type="primary", use_container_width=True, key="gen_hist"):
+                        fig, ax = plt.subplots(figsize=(7, 4))
+                        sns.histplot(df[x_col].dropna(), bins=bins, kde=show_kde,
+                                     ax=ax, color="#0ea5e9", edgecolor="white")
+                        ax.set_title(f"{x_col} 分布直方图", fontsize=13)
+                        ax.set_xlabel(x_col)
+                        ax.set_ylabel("频次")
+                        plt.tight_layout()
+
+                elif chart_type == "🔵 散点图（两变量关系）":
+                    x_col = st.selectbox("X 轴变量", num_cols or all_cols, key="sc_x")
+                    y_col = st.selectbox("Y 轴变量",
+                                         [c for c in (num_cols or all_cols) if c != x_col] or all_cols,
+                                         key="sc_y")
+                    hue_col = st.selectbox("分组变量（可选）",
+                                           ["（不分组）"] + cat_cols, key="sc_hue")
+                    if st.button("🎨 生成图表", type="primary", use_container_width=True, key="gen_sc"):
+                        fig, ax = plt.subplots(figsize=(7, 4))
+                        hue = None if hue_col == "（不分组）" else hue_col
+                        sns.scatterplot(data=df, x=x_col, y=y_col, hue=hue,
+                                        ax=ax, alpha=0.7)
+                        ax.set_title(f"{x_col} vs {y_col}", fontsize=13)
+                        plt.tight_layout()
+
+                elif chart_type == "📦 箱线图（分组比较）":
+                    y_col = st.selectbox("数值变量（Y 轴）", num_cols or all_cols, key="box_y")
+                    x_col = st.selectbox("分组变量（X 轴，可选）",
+                                         ["（不分组）"] + cat_cols, key="box_x")
+                    if st.button("🎨 生成图表", type="primary", use_container_width=True, key="gen_box"):
+                        fig, ax = plt.subplots(figsize=(7, 4))
+                        if x_col == "（不分组）":
+                            sns.boxplot(y=df[y_col].dropna(), ax=ax, color="#6366f1")
+                        else:
+                            order = df[x_col].value_counts().index[:12].tolist()
+                            sns.boxplot(data=df, x=x_col, y=y_col, ax=ax,
+                                        order=order, palette="Set2")
+                            plt.xticks(rotation=30, ha="right")
+                        ax.set_title(f"{y_col} 箱线图", fontsize=13)
+                        plt.tight_layout()
+
+                elif chart_type == "📋 柱状图（类别频次）":
+                    cat_col = st.selectbox("分类变量", cat_cols or all_cols, key="bar_cat")
+                    top_n = st.slider("显示前 N 类", 3, 20, 10, key="bar_topn")
+                    if st.button("🎨 生成图表", type="primary", use_container_width=True, key="gen_bar"):
+                        vc = df[cat_col].value_counts().head(top_n)
+                        fig, ax = plt.subplots(figsize=(7, 4))
+                        vc.plot(kind="bar", ax=ax, color="#6366f1", edgecolor="white")
+                        ax.set_title(f"{cat_col} 类别频次", fontsize=13)
+                        ax.set_ylabel("频次")
+                        plt.xticks(rotation=30, ha="right")
+                        plt.tight_layout()
+
+                elif chart_type == "🔥 相关热力图（多变量）":
+                    corr_cols = st.multiselect(
+                        "选择变量（建议 3-10 个）",
+                        num_cols,
+                        default=num_cols[:6],
+                        key="corr_cols_viz",
+                    )
+                    if st.button("🎨 生成图表", type="primary", use_container_width=True, key="gen_corr"):
+                        if len(corr_cols) < 2:
+                            st.error("至少选择 2 个变量")
+                        else:
+                            corr = df[corr_cols].corr()
+                            fig, ax = plt.subplots(
+                                figsize=(max(5, len(corr_cols)), max(4, len(corr_cols) * 0.85))
+                            )
+                            sns.heatmap(corr, annot=True, fmt=".2f", cmap="coolwarm",
+                                        ax=ax, linewidths=0.5, vmin=-1, vmax=1)
+                            ax.set_title("Pearson 相关系数热力图", fontsize=13)
+                            plt.tight_layout()
+
+                elif chart_type == "📉 折线图（趋势）":
+                    x_col = st.selectbox("X 轴变量（时间/序号）", all_cols, key="line_x")
+                    y_cols = st.multiselect("Y 轴变量（可多选）", num_cols or all_cols,
+                                            default=num_cols[:2] if num_cols else [],
+                                            key="line_y")
+                    if st.button("🎨 生成图表", type="primary", use_container_width=True, key="gen_line"):
+                        if not y_cols:
+                            st.error("请至少选择一个 Y 轴变量")
+                        else:
+                            fig, ax = plt.subplots(figsize=(8, 4))
+                            for yc in y_cols:
+                                ax.plot(df[x_col], df[yc], marker="o", markersize=3,
+                                        linewidth=1.5, label=yc)
+                            ax.set_title("折线图", fontsize=13)
+                            ax.set_xlabel(x_col)
+                            ax.legend()
+                            plt.xticks(rotation=30, ha="right")
+                            plt.tight_layout()
+
+            with chart_col:
+                st.markdown("##### 图表预览")
+                if fig is not None:
+                    st.pyplot(fig, use_container_width=True)
+                    plt.close(fig)
+                else:
+                    st.markdown(
+                        '<div class="feature-card" style="text-align:center;padding:3rem 1rem;">'
+                        '在左侧选择变量和图表类型，点击「生成图表」</div>',
+                        unsafe_allow_html=True,
+                    )
+
+            # ── 图表说明文字生成 ──────────────────────────────────────────────
+            st.divider()
+            st.markdown("#### 🖼️ 图表说明文字生成")
+            st.caption("描述刚才画的图，AI 帮你写成规范的学术图注")
+            desc_c1, desc_c2, desc_c3 = st.columns([1, 1, 1])
+            with desc_c1:
+                chart_type_sel = st.selectbox(
+                    "图表类型",
+                    ["直方图", "散点图", "箱线图", "柱状图", "相关热力图", "折线图",
+                     "生存曲线", "ROC曲线", "火山图", "其他"],
+                    key="desc_chart_type",
+                )
+            with desc_c2:
+                chart_desc_text = st.text_area(
+                    "图表内容描述", height=90,
+                    placeholder="X轴为...，Y轴为...，展示了...",
+                    key="desc_chart_desc",
+                )
+            with desc_c3:
+                chart_findings = st.text_area(
+                    "主要发现", height=90,
+                    placeholder="图表揭示的核心结论...",
+                    key="desc_chart_findings",
+                )
+            if st.button("✍️ 生成图注", use_container_width=True, key="gen_chart_desc"):
+                if not chart_desc_text or not chart_findings:
+                    st.error("请填写图表描述和主要发现")
+                elif _check_config():
+                    with st.spinner("🖊️ AI 正在撰写图注..."):
+                        desc_result = generate_chart_description(
+                            chart_type_sel, chart_desc_text, chart_findings
+                        )
+                    st.markdown(f'<div class="result-box">{desc_result}</div>',
+                                unsafe_allow_html=True)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -514,7 +581,7 @@ elif page == "✍️ 科研表达生成":
                 if not topic:
                     st.error("请填写研究主题")
                 elif _check_config():
-                    with st.spinner("生成中..."):
+                    with st.spinner("📝 AI 正在撰写提纲，请稍候..."):
                         result_text = generate_outline(topic, context)
 
         # ── PPT 文件生成 ──────────────────────────────────────────────────────
@@ -536,7 +603,7 @@ elif page == "✍️ 科研表达生成":
                     if not ppt_file:
                         st.error("请先上传文件")
                     elif _check_config():
-                        with st.spinner("AI 正在读取文件并生成 PPT，请稍候..."):
+                        with st.spinner("🎞️ AI 正在读取文件并生成 PPT，马上好～"):
                             try:
                                 result_text, pptx_bytes = generate_ppt_from_file(
                                     ppt_file.read(), ppt_file.name, duration
@@ -558,7 +625,7 @@ elif page == "✍️ 科研表达生成":
                     if not topic:
                         st.error("请填写汇报主题")
                     elif _check_config():
-                        with st.spinner("生成中..."):
+                        with st.spinner("🎞️ AI 正在规划幻灯片结构..."):
                             result_text = generate_ppt_structure(topic, context, duration)
 
         # ── 论文结果段落 ──────────────────────────────────────────────────────
@@ -583,13 +650,12 @@ elif page == "✍️ 科研表达生成":
                 if not method or not results:
                     st.error("请填写分析方法和关键结果")
                 elif _check_config():
-                    with st.spinner("生成中..."):
+                    with st.spinner("✍️ AI 正在撰写学术段落..."):
                         result_text = generate_result_paragraph(method, results, context)
 
     with col_result:
         st.markdown("#### 生成结果")
         if pptx_bytes:
-            # 先展示内容预览，再提供下载
             if result_text:
                 with st.expander("查看 PPT 内容预览", expanded=False):
                     st.markdown(result_text)

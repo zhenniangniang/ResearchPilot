@@ -1,6 +1,6 @@
 import io
 import urllib.request
-from utils.llm_client import chat, get_client
+from utils.llm_client import chat
 from utils.pdf_parser import extract_text_from_pdf, truncate_text
 from prompts.expression_prompts import (
     EXPRESSION_SYSTEM,
@@ -12,7 +12,6 @@ from prompts.expression_prompts import (
     MODEL_DIAGRAM_SYSTEM,
     MODEL_DIAGRAM_PROMPT_USER,
 )
-from config import IMAGE_MODEL
 
 
 def generate_outline(topic: str, context: str = "") -> str:
@@ -273,9 +272,13 @@ def generate_model_diagram(description: str) -> bytes:
 
     流程：
     1. 调用文本 LLM 将中文描述转化为适合生图的英文 prompt
-    2. 调用 DashScope 通义万象图像生成 API
+    2. 调用 DashScope 通义万象原生 SDK 生成图片（自动处理异步轮询）
     3. 下载并返回图片字节
     """
+    from http import HTTPStatus
+    from dashscope import ImageSynthesis
+    from config import LLM_API_KEY
+
     # Step 1: 生成英文图像 prompt
     prompt_text = chat(
         MODEL_DIAGRAM_SYSTEM,
@@ -283,15 +286,21 @@ def generate_model_diagram(description: str) -> bytes:
     )
     prompt_text = prompt_text.strip()
 
-    # Step 2: 调用图像生成 API（DashScope OpenAI 兼容接口）
-    client = get_client()
-    response = client.images.generate(
-        model=IMAGE_MODEL,
+    # Step 2: 调用通义万象原生 SDK（同步阻塞，内部自动处理异步轮询）
+    rsp = ImageSynthesis.call(
+        api_key=LLM_API_KEY,
+        model="wanx2.1-t2i-turbo",
         prompt=prompt_text,
         n=1,
-        size="1024x1024",
+        size="1024*1024",
     )
-    image_url = response.data[0].url
+
+    if rsp.status_code != HTTPStatus.OK:
+        raise RuntimeError(
+            f"图像生成失败 (code={rsp.status_code}): {rsp.message}"
+        )
+
+    image_url = rsp.output.results[0].url
 
     # Step 3: 下载图片字节
     with urllib.request.urlopen(image_url) as resp:  # noqa: S310

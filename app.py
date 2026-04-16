@@ -365,7 +365,16 @@ elif page == "📊 数据分析建议":
         import matplotlib.pyplot as plt
         import seaborn as sns
 
-        plt.rcParams["font.family"] = ["Arial Unicode MS", "SimHei", "DejaVu Sans"]
+        # 动态查找可用的中文字体（兼容本地 macOS 和云端 Linux）
+        import matplotlib.font_manager as fm
+        _cjk_candidates = [
+            "Noto Sans CJK SC", "Noto Sans SC", "Noto Sans CJK",
+            "WenQuanYi Micro Hei", "WenQuanYi Zen Hei",
+            "Arial Unicode MS", "SimHei", "Microsoft YaHei",
+        ]
+        _available = {f.name for f in fm.fontManager.ttflist}
+        _chosen = next((f for f in _cjk_candidates if f in _available), None)
+        plt.rcParams["font.family"] = _chosen if _chosen else "DejaVu Sans"
         plt.rcParams["axes.unicode_minus"] = False
 
         # 若尚未上传数据，提示先去分析建议页上传

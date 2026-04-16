@@ -1,5 +1,4 @@
 import io
-import urllib.request
 from utils.llm_client import chat
 from utils.pdf_parser import extract_text_from_pdf, truncate_text
 from prompts.expression_prompts import (
@@ -267,43 +266,152 @@ def generate_chart_description(chart_type: str, description: str, findings: str)
     return chat(EXPRESSION_SYSTEM, user_prompt)
 
 
-def generate_model_diagram(description: str) -> bytes:
-    """根据模型描述生成科研模型图，返回图片字节流。
+def _render_diagram_matplotlib(data: dict) -> bytes:
+    """将 JSON 结构数据用 matplotlib 渲染为高清科研架构图。"""
+    import io as _io
+    import matplotlib
+    matplotlib.rcParams['font.sans-serif'] = [
+        'PingFang SC', 'Heiti TC', 'SimHei', 'Microsoft YaHei',
+        'Arial Unicode MS', 'DejaVu Sans',
+    ]
+    matplotlib.rcParams['axes.unicode_minus'] = False
+    import matplotlib.pyplot as plt
+    import matplotlib.patches as mpatches
+    from matplotlib.patches import FancyBboxPatch
+
+    nodes_list = data.get('nodes', [])
+    edges = data.get('edges', [])
+    title = data.get('title', '模型架构图')
+    nodes = {n['id']: n for n in nodes_list}
+
+    # 颜色主题
+    TYPE_STYLE = {
+        'input':    {'bg': '#D6EAF8', 'fg': '#1A5276', 'bd': '#2E86C1'},
+        'process':  {'bg': '#0F3460', 'fg': '#FFFFFF', 'bd': '#0A2040'},
+        'attention':{'bg': '#00B4D8', 'fg': '#FFFFFF', 'bd': '#0096B7'},
+        'fusion':   {'bg': '#00B4D8', 'fg': '#FFFFFF', 'bd': '#0096B7'},
+        'output':   {'bg': '#1E8449', 'fg': '#FFFFFF', 'bd': '#145A32'},
+        'encoder':  {'bg': '#6C3483', 'fg': '#FFFFFF', 'bd': '#512E5F'},
+        'decoder':  {'bg': '#922B21', 'fg': '#FFFFFF', 'bd': '#6E2019'},
+    }
+    DEFAULT_STYLE = {'bg': '#EAECEE', 'fg': '#2C3E50', 'bd': '#AAB7B8'}
+    LEGEND_LABELS = {
+        'input': '输入', 'process': '处理模块', 'attention': '注意力',
+        'fusion': '融合', 'output': '输出', 'encoder': '编码器', 'decoder': '解码器',
+    }
+
+    max_row = max((n.get('row', 0) for n in nodes_list), default=0)
+    max_col = max((n.get('col', 0) for n in nodes_list), default=0)
+    rows = max_row + 1
+    cols = max_col + 1
+
+    cell_w, cell_h = 3.2, 1.8
+    fig_w = max(8, cols * cell_w + 1.2)
+    fig_h = max(5, rows * cell_h + 1.8)
+
+    fig, ax = plt.subplots(figsize=(fig_w, fig_h), dpi=200)
+    ax.set_xlim(0, cols * cell_w)
+    ax.set_ylim(-0.3, rows * cell_h + 1.2)
+    ax.axis('off')
+    ax.set_facecolor('#F4F7FB')
+    fig.patch.set_facecolor('#F4F7FB')
+
+    # 标题
+    ax.text(cols * cell_w / 2, rows * cell_h + 0.7, title,
+            ha='center', va='center', fontsize=15, fontweight='bold',
+            color='#0F3460')
+
+    box_w, box_h = cell_w * 0.72, cell_h * 0.58
+    node_pos = {}
+
+    for nid, node in nodes.items():
+        r, c = node.get('row', 0), node.get('col', 0)
+        cx = c * cell_w + cell_w / 2
+        cy = (rows - 1 - r) * cell_h + cell_h / 2
+        node_pos[nid] = (cx, cy)
+
+        ntype = node.get('type', 'process').lower()
+        s = TYPE_STYLE.get(ntype, DEFAULT_STYLE)
+
+        ax.add_patch(FancyBboxPatch(
+            (cx - box_w / 2, cy - box_h / 2), box_w, box_h,
+            boxstyle="round,pad=0.06",
+            facecolor=s['bg'], edgecolor=s['bd'], linewidth=1.8, zorder=3,
+        ))
+        ax.text(cx, cy, node.get('label', nid),
+                ha='center', va='center', fontsize=10,
+                color=s['fg'], fontweight='bold', zorder=4)
+
+    for edge in edges:
+        src_id, dst_id = edge.get('from'), edge.get('to')
+        if src_id not in node_pos or dst_id not in node_pos:
+            continue
+        x1, y1 = node_pos[src_id]
+        x2, y2 = node_pos[dst_id]
+        dx, dy = x2 - x1, y2 - y1
+        dist = (dx ** 2 + dy ** 2) ** 0.5
+        if dist < 0.01:
+            continue
+        ux, uy = dx / dist, dy / dist
+        sx, sy = x1 + ux * box_w / 2, y1 + uy * box_h / 2
+        ex, ey = x2 - ux * box_w / 2, y2 - uy * box_h / 2
+        ax.annotate('', xy=(ex, ey), xytext=(sx, sy),
+                    arrowprops=dict(arrowstyle='->', color='#555555', lw=1.8,
+                                   mutation_scale=16), zorder=2)
+        elabel = edge.get('label', '')
+        if elabel:
+            ax.text((sx + ex) / 2, (sy + ey) / 2 + 0.1, elabel,
+                    ha='center', va='bottom', fontsize=7.5, color='#555555',
+                    bbox=dict(boxstyle='round,pad=0.2', facecolor='white',
+                              edgecolor='none', alpha=0.85))
+
+    # 图例
+    seen_types = list(dict.fromkeys(
+        n.get('type', 'process').lower() for n in nodes_list
+        if n.get('type', 'process').lower() in TYPE_STYLE
+    ))
+    patches = [mpatches.Patch(facecolor=TYPE_STYLE[t]['bg'],
+                              edgecolor=TYPE_STYLE[t]['bd'],
+                              label=LEGEND_LABELS.get(t, t))
+               for t in seen_types]
+    if patches:
+        ax.legend(handles=patches, loc='lower right', fontsize=8,
+                  framealpha=0.9, ncol=min(len(patches), 4))
+
+    plt.tight_layout(pad=0.5)
+    buf = _io.BytesIO()
+    plt.savefig(buf, format='png', dpi=200, bbox_inches='tight',
+                facecolor='#F4F7FB')
+    plt.close(fig)
+    buf.seek(0)
+    return buf.read()
+
+
+def generate_model_diagram(description: str) -> tuple:
+    """根据模型描述用 matplotlib 生成高清科研模型架构图。
 
     流程：
-    1. 调用文本 LLM 将中文描述转化为适合生图的英文 prompt
-    2. 调用 DashScope 通义万象原生 SDK 生成图片（自动处理异步轮询）
-    3. 下载并返回图片字节
+    1. 调用 LLM 将中文描述解析为结构化 JSON（节点 + 连线）
+    2. 用 matplotlib 代码绘图，文字清晰、高分辨率
     """
-    from http import HTTPStatus
-    from dashscope import ImageSynthesis
-    from config import LLM_API_KEY
+    import json, re
 
-    # Step 1: 生成英文图像 prompt
-    prompt_text = chat(
+    # Step 1: LLM 输出结构化 JSON
+    raw = chat(
         MODEL_DIAGRAM_SYSTEM,
         MODEL_DIAGRAM_PROMPT_USER.format(description=description),
-    )
-    prompt_text = prompt_text.strip()
+    ).strip()
 
-    # Step 2: 调用通义万象原生 SDK（同步阻塞，内部自动处理异步轮询）
-    rsp = ImageSynthesis.call(
-        api_key=LLM_API_KEY,
-        model="wanx2.1-t2i-turbo",
-        prompt=prompt_text,
-        n=1,
-        size="1024*1024",
-    )
+    # 容错：提取 markdown 代码块内的 JSON
+    match = re.search(r'```(?:json)?\s*([\s\S]+?)\s*```', raw)
+    json_str = match.group(1) if match else raw
 
-    if rsp.status_code != HTTPStatus.OK:
-        raise RuntimeError(
-            f"图像生成失败 (code={rsp.status_code}): {rsp.message}"
-        )
+    try:
+        data = json.loads(json_str)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"模型结构解析失败，请重试。原始输出：\n{raw[:300]}") from exc
 
-    image_url = rsp.output.results[0].url
-
-    # Step 3: 下载图片字节
-    with urllib.request.urlopen(image_url) as resp:  # noqa: S310
-        image_bytes = resp.read()
-
-    return image_bytes, prompt_text
+    # Step 2: matplotlib 渲染
+    image_bytes = _render_diagram_matplotlib(data)
+    diagram_json = json.dumps(data, ensure_ascii=False, indent=2)
+    return image_bytes, diagram_json

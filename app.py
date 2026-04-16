@@ -416,9 +416,9 @@ elif page == "📊 数据分析建议":
                         fig, ax = plt.subplots(figsize=(7, 4))
                         sns.histplot(df[x_col].dropna(), bins=bins, kde=show_kde,
                                      ax=ax, color="#0ea5e9", edgecolor="white")
-                        ax.set_title(f"{x_col} 分布直方图", fontsize=13)
+                        ax.set_title(f"Distribution: {x_col}", fontsize=13)
                         ax.set_xlabel(x_col)
-                        ax.set_ylabel("频次")
+                        ax.set_ylabel("Count")
                         plt.tight_layout()
 
                 elif chart_type == "🔵 散点图（两变量关系）":
@@ -449,7 +449,7 @@ elif page == "📊 数据分析建议":
                             sns.boxplot(data=df, x=x_col, y=y_col, ax=ax,
                                         order=order, palette="Set2")
                             plt.xticks(rotation=30, ha="right")
-                        ax.set_title(f"{y_col} 箱线图", fontsize=13)
+                        ax.set_title(f"Boxplot: {y_col}", fontsize=13)
                         plt.tight_layout()
 
                 elif chart_type == "📋 柱状图（类别频次）":
@@ -459,8 +459,8 @@ elif page == "📊 数据分析建议":
                         vc = df[cat_col].value_counts().head(top_n)
                         fig, ax = plt.subplots(figsize=(7, 4))
                         vc.plot(kind="bar", ax=ax, color="#6366f1", edgecolor="white")
-                        ax.set_title(f"{cat_col} 类别频次", fontsize=13)
-                        ax.set_ylabel("频次")
+                        ax.set_title(f"Category Frequency: {cat_col}", fontsize=13)
+                        ax.set_ylabel("Count")
                         plt.xticks(rotation=30, ha="right")
                         plt.tight_layout()
 
@@ -481,7 +481,7 @@ elif page == "📊 数据分析建议":
                             )
                             sns.heatmap(corr, annot=True, fmt=".2f", cmap="coolwarm",
                                         ax=ax, linewidths=0.5, vmin=-1, vmax=1)
-                            ax.set_title("Pearson 相关系数热力图", fontsize=13)
+                            ax.set_title("Pearson Correlation Heatmap", fontsize=13)
                             plt.tight_layout()
 
                 elif chart_type == "📉 折线图（趋势）":
@@ -497,7 +497,7 @@ elif page == "📊 数据分析建议":
                             for yc in y_cols:
                                 ax.plot(df[x_col], df[yc], marker="o", markersize=3,
                                         linewidth=1.5, label=yc)
-                            ax.set_title("折线图", fontsize=13)
+                            ax.set_title("Line Chart", fontsize=13)
                             ax.set_xlabel(x_col)
                             ax.legend()
                             plt.xticks(rotation=30, ha="right")

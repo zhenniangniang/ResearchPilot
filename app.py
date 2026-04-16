@@ -24,6 +24,7 @@ from modules.expression import (
     generate_ppt_from_file,
     generate_result_paragraph,
     generate_chart_description,
+    generate_model_diagram,
 )
 import config
 
@@ -558,13 +559,13 @@ elif page == "✍️ 科研表达生成":
     st.markdown("""
     <div class="main-header">
         <h1>✍️ 科研表达生成</h1>
-        <p>生成开题报告提纲、PPT 文件、论文结果段落，AI 全程辅助科研写作</p>
+        <p>生成开题报告提纲、PPT 文件、AI 科研模型图，全程辅助科研写作</p>
     </div>
     """, unsafe_allow_html=True)
 
     expr_type = st.segmented_control(
         "选择生成类型",
-        ["📋 开题报告提纲", "🖥️ PPT 文件生成", "📝 论文结果段落"],
+        ["📋 开题报告提纲", "🖥️ PPT 文件生成", "🎨 模型图制作"],
         default="📋 开题报告提纲",
     )
 
@@ -573,6 +574,8 @@ elif page == "✍️ 科研表达生成":
     with col_form:
         result_text = ""
         pptx_bytes = None
+        image_bytes = None
+        image_prompt = ""
 
         # ── 开题报告提纲 ──────────────────────────────────────────────────────
         if expr_type == "📋 开题报告提纲":
@@ -637,30 +640,25 @@ elif page == "✍️ 科研表达生成":
                         with st.spinner("🎞️ AI 正在规划幻灯片结构..."):
                             result_text = generate_ppt_structure(topic, context, duration)
 
-        # ── 论文结果段落 ──────────────────────────────────────────────────────
-        elif expr_type == "📝 论文结果段落":
-            st.markdown("#### 论文结果段落生成")
-            st.caption("输入统计分析数据，AI 自动生成符合期刊规范的结果章节段落")
-            method = st.text_input(
-                "分析方法 *",
-                placeholder="例如：多因素 Logistic 回归分析",
+        # ── 模型图制作 ────────────────────────────────────────────────────────
+        elif expr_type == "🎨 模型图制作":
+            st.markdown("#### AI 科研模型图生成")
+            st.caption("描述你的模型架构或工作流程，AI 自动生成科研风格示意图")
+            model_desc = st.text_area(
+                "模型描述 *",
+                placeholder="例如：一个基于 Transformer 的多模态融合框架，输入端分别接收图像特征（CNN提取）和文本特征（BERT编码），经过跨模态注意力模块融合后，输出分类结果...",
+                height=200,
             )
-            results = st.text_area(
-                "关键数据/结果 *",
-                placeholder="例如：年龄（OR=1.05, 95%CI 1.02-1.08, P<0.001）、\n高血压（OR=2.3, 95%CI 1.4-3.7, P=0.001）...",
-                height=140,
-            )
-            context = st.text_area(
-                "补充说明（可选）",
-                placeholder="研究背景或样本信息...",
-                height=80,
-            )
-            if st.button("生成段落", type="primary", use_container_width=True):
-                if not method or not results:
-                    st.error("请填写分析方法和关键结果")
+            st.info("💡 图像由通义万象生成，建议描述模块组成、数据流向、核心创新点，生成效果更佳")
+            if st.button("🎨 生成模型图", type="primary", use_container_width=True):
+                if not model_desc.strip():
+                    st.error("请填写模型描述")
                 elif _check_config():
-                    with st.spinner("✍️ AI 正在撰写学术段落..."):
-                        result_text = generate_result_paragraph(method, results, context)
+                    with st.spinner("🖼️ AI 正在理解模型并生成示意图，请稍候..."):
+                        try:
+                            image_bytes, image_prompt = generate_model_diagram(model_desc)
+                        except Exception as e:
+                            st.error(f"生成失败：{e}")
 
     with col_result:
         st.markdown("#### 生成结果")
@@ -677,6 +675,18 @@ elif page == "✍️ 科研表达生成":
                 use_container_width=True,
                 type="primary",
             )
+        elif image_bytes:
+            st.image(image_bytes, caption="AI 生成的科研模型图", use_container_width=True)
+            st.download_button(
+                "⬇️ 下载模型图（PNG）",
+                data=image_bytes,
+                file_name="科研模型图.png",
+                mime="image/png",
+                use_container_width=True,
+                type="primary",
+            )
+            with st.expander("查看图像生成 Prompt", expanded=False):
+                st.code(image_prompt, language="text")
         elif result_text:
             st.markdown(result_text)
             st.download_button(

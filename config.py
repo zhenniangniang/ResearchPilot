@@ -19,6 +19,7 @@ def _get_secret(key: str, default: str = "") -> str:
 LLM_API_KEY  = _get_secret("LLM_API_KEY",  "")
 LLM_BASE_URL = _get_secret("LLM_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1")
 LLM_MODEL    = _get_secret("LLM_MODEL",    "qwen-plus")
+IMAGE_MODEL  = _get_secret("IMAGE_MODEL",  "wanx2.1-t2i-turbo")  # 通义万象文生图模型
 
 # ==================== 文档解析配置 ====================
 MAX_PDF_PAGES  = 30       # 最多解析 PDF 页数
